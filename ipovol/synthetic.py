@@ -59,12 +59,17 @@ def generate(n_ipo=160, seed=7, horizon=HORIZON, truth=TRUTH):
     ))
     Z = (raw - raw.mean()) / raw.std()
     theta = np.array([T["theta"][f] for f in FEATURES])
-    a_R = np.exp(T["theta0_R"] + Z[FEATURES].to_numpy() @ theta)
+    lin = Z[FEATURES].to_numpy() @ theta
+    if T.get("form") == "alt":
+        # nonlinear feature effects the model cannot represent: threshold on float, interaction
+        lin = lin + 0.35 * (Z["float_pct"] < -0.8) + 0.25 * Z["tech"] * Z["first_day_ret"]
+    a_R = np.exp(T["theta0_R"] + lin)
     a_I = a_R * T["a_I_scale"]
     eps = np.exp(rng.normal(0, T["idio_level_sd"], n_ipo) - 0.5 * T["idio_level_sd"] ** 2)
 
     ipo_dates = pd.to_datetime(rng.choice(pd.bdate_range("2012-01-03", "2024-06-28"), n_ipo, replace=False))
     deals, px, earnings = [], {}, {}
+    v_true, iv_true = {}, {}
     for i in range(n_ipo):
         tk, pk = f"IPO{i:03d}", f"PEER{i:03d}"
         dates = pd.bdate_range(ipo_dates[i], periods=horizon + 1)
@@ -84,8 +89,13 @@ def generate(n_ipo=160, seed=7, horizon=HORIZON, truth=TRUTH):
         lk_t = int(dates.searchsorted(ipo_dates[i] + pd.Timedelta(days=180)))
         q_t = int(dates.searchsorted(ipo_dates[i] + pd.Timedelta(days=25)))
         k = np.searchsorted(np.array(e_t), t, side="left")
-        M_R = T["beta_R"] * (1 + a_R[i] * np.exp(-t / T["tau_R"]) * T["delta"] ** k) * eps[i]
-        M_I = T["beta_I"] * (1 + a_I[i] * np.exp(-t / T["tau_I"]) * T["delta"] ** k) * eps[i]
+        if T.get("form") == "alt":
+            # power-law decay, no step at earnings
+            M_R = T["beta_R"] * (1 + a_R[i] * (1 + t / T["tau_R"]) ** -1.5) * eps[i]
+            M_I = T["beta_I"] * (1 + a_I[i] * (1 + t / T["tau_I"]) ** -1.5) * eps[i]
+        else:
+            M_R = T["beta_R"] * (1 + a_R[i] * np.exp(-t / T["tau_R"]) * T["delta"] ** k) * eps[i]
+            M_I = T["beta_I"] * (1 + a_I[i] * np.exp(-t / T["tau_I"]) * T["delta"] ** k) * eps[i]
         v = peer_v * M_R
         jumps = np.zeros(n)
         for j, te in enumerate(e_t):
@@ -112,8 +122,17 @@ def generate(n_ipo=160, seed=7, horizon=HORIZON, truth=TRUTH):
             D = (T["D_earn1"] if j == 0 else T["D_earn2"]) if j < len(e_t) else \
                 (T["lock_p"] * (1 - T["lock_p"]) * T["lock_g_sd"] ** 2 + T["lock_gauss_D"] if te == lk_t else T["D_quiet"])
             dd = (dates[te] - dates).days
-            inwin = (dd >= 0) & (dd <= 30)
+            inwin = (dd >= 1) & (dd <= 30)
             iv2 = iv2 + inwin * D * v[te] / (30 / CAL_DAYS)
+        iv_true[tk] = pd.Series(np.sqrt(iv2), index=dates)
+        ev = v.copy()
+        for j, te in enumerate(e_t):
+            ev[te] += (T["D_earn1"] if j == 0 else T["D_earn2"]) * v[te]
+        if lk_t < n:
+            ev[lk_t] += (T["lock_p"] * (1 - T["lock_p"]) * T["lock_g_sd"] ** 2 + T["lock_gauss_D"]) * v[lk_t]
+        if q_t < n:
+            ev[q_t] += T["D_quiet"] * v[q_t]
+        v_true[tk] = pd.Series(ev, index=dates)
         iv_atm = np.sqrt(iv2) * np.exp(rng.normal(0, 0.03, n))
         psi = T["peer_psi"] + T["dpsi_c"] * np.exp(-t / T["dpsi_tau"]) + T["dpsi_d"] + rng.normal(0, 0.02, n)
         gam = T["peer_gamma"] + T["dgamma"] + rng.normal(0, 0.01, n)
@@ -134,4 +153,4 @@ def generate(n_ipo=160, seed=7, horizon=HORIZON, truth=TRUTH):
         deals.append(dict(ticker=tk, ipo_date=dates[0], peers=[pk], lockup_date=pd.NaT,
                           **raw.iloc[i].to_dict()))
     deals = pd.DataFrame(deals).set_index("ticker")
-    return deals, px, earnings, dict(a_R=a_R, eps=eps, Z=Z)
+    return deals, px, earnings, dict(a_R=a_R, eps=eps, Z=Z, v_true=v_true, iv_true=iv_true)

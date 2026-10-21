@@ -87,11 +87,11 @@ def build_panel(deals: pd.DataFrame, px: dict, earnings: dict, horizon: int = HO
         for te in t_ev:
             in_win |= np.abs(t - te) <= EVENT_HALF_WINDOW
         f["event_window"] = in_win
-        # IV exclusion: any IPO event reaction within the next 30 calendar days (inclusive of today)
+        # IV exclusion: any IPO event reaction within the next 30 calendar days (not yet in today's close)
         ahead = np.zeros(len(f), bool)
         for te in t_ev:
             dd = (dates[te] - dates).days
-            ahead |= (dd >= 0) & (dd <= 30)
+            ahead |= (dd >= 1) & (dd <= 30)
         f["event_ahead_30"] = ahead
         e_pos = sorted(e[2] for e in events if e[0] == "earnings")
         f["k"] = np.searchsorted(np.array(e_pos), t, side="left") if e_pos else 0

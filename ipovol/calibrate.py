@@ -101,10 +101,46 @@ def realized_blocks(panel: pd.DataFrame) -> pd.DataFrame:
     return b
 
 
-def implied_blocks(panel: pd.DataFrame) -> pd.DataFrame:
-    p = panel[(panel["t"] >= 1) & ~panel["event_ahead_30"] & panel["iv_atm"].notna()
-              & panel["peer_iv_atm"].notna()].copy()
+def _event_D(jumps: dict, kind: str, seq: int) -> float:
+    key = {"quiet": "D_quiet", "lockup": "D_lockup"}.get(kind, "D_earn1" if seq == 1 else "D_earn2")
+    d = jumps.get(key, 0.0)
+    return float(d) if np.isfinite(d) else 0.0
+
+
+def implied_blocks(panel: pd.DataFrame, events: pd.DataFrame | None = None,
+                   jumps: dict | None = None) -> pd.DataFrame:
+    """IPO/peer implied-variance ratio by 5-day block, *diffusive* part only.
+
+    With events + jumps, each day's 30d implied variance is stripped of the expected variance of
+    IPO events inside its window (J = D x local var, spread over 30/365), so every day is usable,
+    including the first ~18 days whose window always contains the quiet-period end. Without them,
+    falls back to dropping days with an event ahead (which leaves days 1-18 unobserved and makes
+    the curve extrapolate into them - the source of an early-days bias).
+    """
+    p = panel[(panel["t"] >= 1) & panel["iv_atm"].notna() & panel["peer_iv_atm"].notna()].copy()
     p["iv2"], p["piv2"] = p["iv_atm"] ** 2, p["peer_iv_atm"] ** 2
+    if events is None or jumps is None or events.empty:
+        p = p[~p["event_ahead_30"]]
+    else:
+        p = p.reset_index(drop=True)
+        adj = np.zeros(len(p))
+        bad = np.zeros(len(p), bool)
+        dates = p["date"].to_numpy()
+        rows_by_tk = p.groupby("ticker").indices
+        for ev in events.itertuples():
+            rows = rows_by_tk.get(ev.ticker)
+            if rows is None:
+                continue
+            dd = (np.datetime64(ev.date) - dates[rows]).astype("timedelta64[D]").astype(int)
+            sel = rows[(dd >= 1) & (dd <= 30)]          # event still ahead at today's close
+            if np.isfinite(ev.local_var) and ev.local_var > 0:
+                adj[sel] += _event_D(jumps, ev.kind, ev.seq) * ev.local_var * 365.0 / 30.0
+            else:
+                bad[sel] = True
+        iv2 = p["iv2"].to_numpy() - adj
+        keep = ~bad & (iv2 > 0.25 * p["iv2"].to_numpy())
+        p["iv2"] = iv2
+        p = p[keep]
     p["block"] = (p["t"] - 1) // BLOCK
     b = p.groupby(["ticker", "block"]).agg(num=("iv2", "mean"), den=("piv2", "mean"),
                                             n=("iv2", "size"), t=("t", "mean"), k=("k", "min"))
@@ -337,10 +373,10 @@ def peer_vrp_ratio(panel) -> float:
 def calibrate(panel, events, feats, n0: float | None = None, ridge=2.0, verbose=True) -> Calibration:
     scaler = Scaler.fit(feats)
     Z = scaler.transform(feats)
-    rb, ib = realized_blocks(panel), implied_blocks(panel)
+    jumps = fit_jumps(events)                       # first: implied blocks strip event variance
+    rb, ib = realized_blocks(panel), implied_blocks(panel, events, jumps)
     cR = fit_curve(rb, Z, ridge=ridge)
     cI = fit_curve(ib, Z, ridge=ridge) if len(ib) > 50 else cR
-    jumps = fit_jumps(events)
     skew = fit_skew(skew_blocks(panel))
     borrow = fit_borrow(panel)
     n0_curve = None
@@ -359,7 +395,7 @@ def bootstrap(panel, events, feats, base: Calibration, B=200, seed=1, ridge=2.0)
     """Cluster bootstrap by IPO. Keeps base scaler, n0 and borrow; refits curves, jumps, skew."""
     rng = np.random.default_rng(seed)
     Z = base.scaler.transform(feats)
-    rb, ib, sb = realized_blocks(panel), implied_blocks(panel), skew_blocks(panel)
+    rb, ib, sb = realized_blocks(panel), implied_blocks(panel, events, base.jumps), skew_blocks(panel)
     g_rb, g_ib, g_sb = (dict(tuple(x.groupby("ticker"))) for x in (rb, ib, sb))
     g_ev = dict(tuple(events.groupby("ticker")))
     tickers = np.array(sorted(g_rb))

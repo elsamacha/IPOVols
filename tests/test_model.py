@@ -142,4 +142,4 @@ def test_standard_expiries():
 def test_backtest_runs(universe):
     deals, px, earn = universe
     res, summ = backtest(deals, px, earn, origins=(10,), folds=3, verbose=False)
-    assert len(res) > 40 and set(summ["method"]) == {"model", "B0", "B1"}
+    assert len(res) > 40 and set(summ["method"]) == {"model", "LR", "B0", "B1"}
