@@ -1,0 +1,9 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
+# generated outputs and data pulls (may contain licensed Bloomberg data - never commit)
+output/
+data/*.pkl
+data/bbg_raw*
+data/borrow*.csv

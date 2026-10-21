@@ -1,0 +1,5 @@
+ticker,ipo_date,offer_price,shares_offered,peers,listing_type,lockup_date,vc_backed,tech
+ARM US Equity,2023-09-14,51,95500000,NVDA US Equity;AMD US Equity;QCOM US Equity;AVGO US Equity,ipo,,0,1
+CRWV US Equity,2025-03-28,40,37500000,NVDA US Equity;ORCL US Equity;NBIS US Equity;DLR US Equity,ipo,,1,1
+SNOW US Equity,2020-09-16,120,28000000,DDOG US Equity;MDB US Equity;CRM US Equity;NOW US Equity,ipo,,1,1
+RDDT US Equity,2024-03-21,34,22000000,META US Equity;PINS US Equity;SNAP US Equity,ipo,,1,1

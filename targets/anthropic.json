@@ -1,0 +1,16 @@
+{
+  "name": "Anthropic",
+  "listing_date": "2027-01-11",
+  "offer_price": 100.0,
+  "valuation_usd": 350000000000,
+  "float_pct": 0.06,
+  "expected_first_day_ret": 0.25,
+  "vc_backed": 1,
+  "tech": 1,
+  "peers": ["NVDA US Equity", "PLTR US Equity", "CRWV US Equity", "ARM US Equity",
+            "SNOW US Equity", "MSFT US Equity", "GOOGL US Equity"],
+  "listing_day_D": 20,
+  "borrow_now": 0.15,
+  "extra_events": [{"date": "2027-02-15", "D": 4.0, "name": "model release (placeholder)"}],
+  "event_premium": 1.1
+}
